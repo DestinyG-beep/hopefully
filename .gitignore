@@ -19,7 +19,6 @@ instance/
 # Logs and other runtime files
 *.log
 *.pid
-*.seed
 *.bak
 *.swp
 *.swo
