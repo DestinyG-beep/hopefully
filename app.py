@@ -22,7 +22,7 @@ class BaseRoute(Resource):
             "message": "Welcome to the Job Management API! Below are the available routes:",
             "routes": {
                 "/get_jobs": "Retrieve all jobs.",
-                "/get_job/<int:job_id>": "Retrieve a job by ID or job name.",
+                "/get_job": "Retrieve a job by ID or job name (e.g., /get_job?job_id=1 or /get_job?job_name=Software Engineer).",
                 "/get_users": "Retrieve all users.",
                 "/get_user": "Retrieve a user by ID or username (e.g., /get_user?user_id=1 or /get_user?username=john_doe).",
                 "/add_user": "Add a new user.",
@@ -31,17 +31,16 @@ class BaseRoute(Resource):
                 "/get_payments": "Retrieve all payments.",
                 "/get_payment": "Retrieve a payment by ID or username (e.g., /get_payment?payment_id=1 or /get_payment?username=john_doe).",
                 "/add_payment": "Add a new payment.",
-                "/get_resources": "Retrieve all extra resources.",
-                "/get_resource": "Retrieve a resource by ID, job name, or resource type (e.g., /get_resource?resource_id=1 or /get_resource?job_name=Software Engineer or /get_resource?resource_type=Document).",
-                "/add_resource": "Add a new extra resource.",
-                "/update_resource/<int:resource_id>": "Update a resource by ID.",
-                "/delete_resource/<int:resource_id>": "Delete a resource by ID.",
+                "/get_job_resources": "Retrieve all extra resources for a job.",
+                "/get_job_resource": "Retrieve a resource by ID, job name, or resource type (e.g., /get_job_resource?resource_id=1 or /get_job_resource?job_name=Software Engineer or /get_job_resource?resource_type=Document).",
+                "/add_job_resource": "Add a new extra resource.",
+                "/update_job_resource/<int:resource_id>": "Update a resource by ID.",
+                "/delete_job_resource/<int:resource_id>": "Delete a resource by ID.",
                 "/get_applications": "Retrieve all job applications.",
                 "/get_application": "Retrieve a job application by ID, username, or job name (e.g., /get_application?application_id=1 or /get_application?username=john_doe or /get_application?job_name=Software Engineer).",
                 "/add_application": "Add a new job application.",
             }
         })
-
 # Job Routes
 class GetJobs(Resource):
     def get(self):
@@ -61,9 +60,13 @@ class GetJob(Resource):
         job_name = request.args.get('job_name', type=str)
 
         if job_id:
-            job = Job.query.get_or_404(job_id)
+            job = Job.query.get(job_id)
+            if not job:
+                return jsonify({"message": f"Job with ID {job_id} not found."}), 404
         elif job_name:
-            job = Job.query.filter_by(title=job_name).first_or_404()
+            job = Job.query.filter_by(title=job_name).first()
+            if not job:
+                return jsonify({"message": f"Job with name '{job_name}' not found."}), 404
         else:
             return jsonify({"error": "Either job_id or job_name must be provided"}), 400
 
@@ -92,9 +95,13 @@ class GetUser(Resource):
         username = request.args.get('username', type=str)
 
         if user_id:
-            user = User.query.get_or_404(user_id)
+            user = User.query.get(user_id)
+            if not user:
+                return jsonify({"message": f"User with ID {user_id} not found."}), 404
         elif username:
-            user = User.query.filter_by(username=username).first_or_404()
+            user = User.query.filter_by(username=username).first()
+            if not user:
+                return jsonify({"message": f"User with username '{username}' not found."}), 404
         else:
             return jsonify({"error": "Either user_id or username must be provided"}), 400
 
@@ -188,17 +195,30 @@ class GetPayment(Resource):
         payment_id = request.args.get('payment_id', type=int)
         username = request.args.get('username', type=str)
 
+        # Check for payment_id
         if payment_id:
-            payment = Payment.query.get_or_404(payment_id)
+            payment = Payment.query.get(payment_id)  # .get() is used for getting by ID
+            if payment:
+                return jsonify(payment.to_dict())
+            else:
+                return jsonify({"message": "Payment not found with the provided ID."}), 404
+
+        # Check for username
         elif username:
-            user = User.query.filter_by(username=username).first_or_404()
-            payment = Payment.query.filter_by(user_id=user.id).all()
-            if not payment:
-                return jsonify({"error": "No payments found for this user"}), 404
+            user = User.query.filter_by(username=username).first()
+            if user:
+                payments = Payment.query.filter_by(user_id=user.id).all()
+                if payments:
+                    return jsonify([payment.to_dict() for payment in payments])
+                else:
+                    return jsonify({"message": "No payments found for the provided username."}), 404
+            else:
+                return jsonify({"message": "User with the provided username does not exist."}), 404
+
+        # If neither payment_id nor username is provided
         else:
             return jsonify({"error": "Either payment_id or username must be provided"}), 400
 
-        return jsonify([payment.to_dict() for payment in payment])
 
 class AddPayment(Resource):
     def post(self):
@@ -234,17 +254,36 @@ class GetResource(Resource):
         job_name = request.args.get('job_name', type=str)
         resource_type = request.args.get('resource_type', type=str)
 
+        # Handle resource_id
         if resource_id:
-            resource = ExtraResource.query.get_or_404(resource_id)
+            resource = ExtraResource.query.get(resource_id)
+            if resource:
+                return jsonify(resource.to_dict())  # No iteration needed for a single object
+            else:
+                return jsonify({"message": "Resource not found with the provided ID."}), 404
+
+        # Handle job_name
         elif job_name:
-            job = Job.query.filter_by(title=job_name).first_or_404()
-            resource = ExtraResource.query.filter_by(job_id=job.id).all()
+            job = Job.query.filter_by(title=job_name).first()
+            if job:
+                resources = ExtraResource.query.filter_by(job_id=job.id).all()
+                if resources:
+                    return jsonify([resource.to_dict() for resource in resources])
+                else:
+                    return jsonify({"message": "No resources found for this job."}), 404
+
+        # Handle resource_type
         elif resource_type:
-            resource = ExtraResource.query.filter_by(resource_type=resource_type).all()
+            resources = ExtraResource.query.filter_by(resource_type=resource_type).all()
+            if resources:
+                return jsonify([resource.to_dict() for resource in resources])
+            else:
+                return jsonify({"message": "No resources found for this type."}), 404
+
+        # If neither resource_id, job_name, nor resource_type is provided
         else:
             return jsonify({"error": "Provide either resource_id, job_name, or resource_type."}), 400
 
-        return jsonify([resource.to_dict() for resource in resource])
 
 class AddResource(Resource):
     def post(self):
@@ -284,6 +323,7 @@ class AddResource(Resource):
             return jsonify(resource.to_dict()), 201
         except Exception as e:
             return jsonify({"error": str(e)}), 400
+
 class UpdateResource(Resource):
     def put(self, resource_id):
         resource = ExtraResource.query.get_or_404(resource_id)
@@ -372,21 +412,41 @@ class GetApplication(Resource):
         username = request.args.get('username', type=str)
         job_name = request.args.get('job_name', type=str)
 
+        # Handle application_id
         if application_id:
-            application = JobApplication.query.get_or_404(application_id)
+            application = JobApplication.query.get(application_id)
+            if application:
+                return jsonify(application.to_dict())  # No iteration needed for a single object
+            else:
+                return jsonify({"message": "Application not found with the provided ID."}), 404
+
+        # Handle username
         elif username:
-            user = User.query.filter_by(username=username).first_or_404()
-            application = JobApplication.query.filter_by(user_id=user.id).all()
-            if not application:
-                return jsonify({"error": "No applications found for this user"}), 404
+            user = User.query.filter_by(username=username).first()
+            if user:
+                applications = JobApplication.query.filter_by(user_id=user.id).all()
+                if applications:
+                    return jsonify([application.to_dict() for application in applications])
+                else:
+                    return jsonify({"message": "No applications found for this user."}), 404
+            else:
+                return jsonify({"message": "User with the provided username does not exist."}), 404
+
+        # Handle job_name
         elif job_name:
-            job = Job.query.filter_by(title=job_name).first_or_404()
-            application = JobApplication.query.filter_by(job_id=job.id).all()
+            job = Job.query.filter_by(title=job_name).first()
+            if job:
+                applications = JobApplication.query.filter_by(job_id=job.id).all()
+                if applications:
+                    return jsonify([application.to_dict() for application in applications])
+                else:
+                    return jsonify({"message": "No applications found for this job."}), 404
+
+        # If neither application_id, username, nor job_name is provided
         else:
             return jsonify({"error": "Provide either application_id, username, or job_name."}), 400
 
-        return jsonify([application.to_dict() for application in application])
-
+                       
 class AddApplication(Resource):
     def post(self):
         data = request.get_json()
@@ -427,8 +487,8 @@ api.add_resource(UpdateResource, '/update_job_resource/<int:resource_id>')
 api.add_resource(DeleteResource, '/delete_job_resource/<int:resource_id>')
 
 api.add_resource(GetApplications, '/get_applications')
-api.add_resource(GetApplication, '/get_application')  # Changed this route to handle ID, username, or job name
+api.add_resource(GetApplication, '/get_application')  # Changed this route to handle application ID, username, or job name
 api.add_resource(AddApplication, '/add_application')
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
