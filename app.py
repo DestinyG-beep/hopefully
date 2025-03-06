@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from flask_migrate import Migrate
 from flask_restful import Api, Resource
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Job, JobApplication, Payment, ExtraResource
 import datetime
 
@@ -10,10 +12,12 @@ cors = CORS(app, origins="*")
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///Job.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'your_secret_key'  # Change to a secure key
+app.config['JWT_SECRET_KEY'] = 'your_jwt_secret_key'  # Change to a secure key
 
 db.init_app(app)
 migrate = Migrate(app, db)
 api = Api(app)
+jwt = JWTManager(app)
 
 # Base route that lists all available API endpoints with explanations
 class BaseRoute(Resource):
@@ -41,6 +45,46 @@ class BaseRoute(Resource):
                 "/add_application": "Add a new job application.",
             }
         })
+
+# User Registration Route
+class RegisterUser(Resource):
+    def post(self):
+        data = request.get_json()
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        role = data.get('role', 'graduate')
+
+        if User.query.filter_by(email=email).first():
+            return jsonify({"message": "User already exists"}), 400
+
+        hashed_password = generate_password_hash(password)
+        new_user = User(username=username, email=email, password_hash=hashed_password, role=role)
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({"message": "User registered successfully"}), 201
+
+# User Login Route
+class LoginUser(Resource):
+    def post(self):
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+
+        user = User.query.filter_by(email=email).first()
+        if not user or not check_password_hash(user.password_hash, password):
+            return jsonify({"message": "Invalid credentials"}), 401
+
+        access_token = create_access_token(identity={'id': user.id, 'role': user.role})
+        return jsonify(access_token=access_token), 200
+
+# Protected Route Example
+class ProtectedRoute(Resource):
+    @jwt_required()
+    def get(self):
+        current_user = get_jwt_identity()
+        return jsonify(logged_in_as=current_user), 200
 
 # Job Routes
 class GetJobs(Resource):
@@ -408,6 +452,10 @@ class AddApplication(Resource):
 
 # Add resources to API with specific HTTP methods and unique routes
 api.add_resource(BaseRoute, '/')
+api.add_resource(RegisterUser, '/register')
+api.add_resource(LoginUser, '/login')
+api.add_resource(ProtectedRoute, '/protected')
+
 api.add_resource(GetJobs, '/get_jobs')
 api.add_resource(GetJob, '/get_job')  # Changed this route to handle both job ID and job name
 api.add_resource(GetUsers, '/get_users')
